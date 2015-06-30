@@ -1,72 +1,183 @@
 /*
-    ChibiOS/RT - Copyright (C) 2006-2013 Giovanni Di Sirio
+ ChibiOS/RT - Copyright (C) 2006-2013 Giovanni Di Sirio
 
-    Licensed under the Apache License, Version 2.0 (the "License");
-    you may not use this file except in compliance with the License.
-    You may obtain a copy of the License at
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
 
-        http://www.apache.org/licenses/LICENSE-2.0
+ http://www.apache.org/licenses/LICENSE-2.0
 
-    Unless required by applicable law or agreed to in writing, software
-    distributed under the License is distributed on an "AS IS" BASIS,
-    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-    See the License for the specific language governing permissions and
-    limitations under the License.
-*/
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ */
 
 #include "ch.h"
 #include "hal.h"
 
 #include <sim900d.h>
+#include <mavlink.h>
 
-#define SIM900_DETECTED 0x01
+#define SIM900D_DETECTED 	0x01
+#define SIM900D_INIT_ERROR 	0x02
+
+#define SIM900D_SEND_BUF MAVLINK_MAX_PACKET_LEN * 2
+#define SIM900D_SEND_TIMEOUT_MS	500
 
 uint8_t g_boardStatus = 0;
 
-static const SerialConfig uart2_cfg = {
-    115200,
-    LCR_WL8 | LCR_STOP1 | LCR_NOPARITY,
-    FCR_TRIGGER0
-};
-static const SerialConfig uart3_cfg = {
-    57600,
-    LCR_WL8 | LCR_STOP1 | LCR_NOPARITY,
-    FCR_TRIGGER0
-};
+static const SerialConfig uart2_cfg = { 115200, LCR_WL8 | LCR_STOP1
+		| LCR_NOPARITY, FCR_TRIGGER0 };
+static const SerialConfig uart3_cfg = { 57600, LCR_WL8 | LCR_STOP1
+		| LCR_NOPARITY, FCR_TRIGGER0 };
 
 static WORKING_AREA(waBlinkerThread, 64);
 static msg_t BlinkerThread(void *arg) {
-  (void)arg;
-  palClearPad(GPIO1, GPIO1_LED2_Y);
-  palClearPad(GPIO1, GPIO1_LED1_Y);
-  while (TRUE) {
-    systime_t time = 50;
-    if (g_boardStatus & SIM900_DETECTED) {
-      time = 250;
-    }
-    palTogglePad(GPIO1, GPIO1_LED2_Y);
-    chThdSleepMilliseconds(time);
-  }
-  /* This point may be reached if shut down is requested. */
-  return 0;
+	(void) arg;
+	palClearPad(GPIO1, GPIO1_LED2_Y);palClearPad(GPIO1, GPIO1_LED1_Y);
+	while (TRUE) {
+		systime_t time = 50;
+		if (g_boardStatus & SIM900D_DETECTED)
+			time = 250;
+		else if (g_boardStatus & SIM900D_INIT_ERROR)
+			time = 2000;
+		else
+			time = 50;
+		palTogglePad(GPIO1, GPIO1_LED2_Y);
+		chThdSleepMilliseconds(time);
+	}
+	/* This point may be reached if shut down is requested. */
+	return 0;
 }
 
 static WORKING_AREA(waUARTResend, 2048);
 static msg_t UARTResend(void *arg) {
-  (void)arg;
-  uint8_t buf[64];
-  while (TRUE) {
-    uint8_t bytesRead = chnReadTimeout(&SD3, buf, 64, MS2ST(5));
-    if(bytesRead > 0)
-    chnWrite(&SD4, buf, bytesRead);
-    bytesRead = chnReadTimeout(&SD4, buf, 64, MS2ST(5));
-    if(bytesRead > 0)
-    chnWrite(&SD3, buf, bytesRead);
-    //chnWrite(&SD4, b, sizeof(b));
-    chThdSleepMilliseconds(100);
-  }
-  /* This point may be reached if shut down is requested. */
-  return 0;
+	(void) arg;
+	uint8_t buf[64];
+	while (TRUE) {
+		uint8_t bytesRead = chnReadTimeout(&SD3, buf, 64, MS2ST(5));
+		if (bytesRead > 0)
+			chnWrite(&SD4, buf, bytesRead);
+		bytesRead = chnReadTimeout(&SD4, buf, 64, MS2ST(5));
+		if (bytesRead > 0)
+			chnWrite(&SD3, buf, bytesRead);
+		//chnWrite(&SD4, b, sizeof(b));
+		chThdSleepMilliseconds(100);
+	}
+	/* This point may be reached if shut down is requested. */
+	return 0;
+}
+
+static WORKING_AREA(waUART, 6144);
+static msg_t UART(void *arg) {
+	(void) arg;
+	if (init_sim900d(&SD3)) {
+		g_boardStatus |= SIM900D_DETECTED;
+	} else
+		g_boardStatus |= SIM900D_INIT_ERROR;
+
+	static mavlink_message_t msg;
+	static mavlink_message_t msgs;
+	static mavlink_status_t status;
+	uint8_t bufS[SIM900D_SEND_BUF];
+	uint8_t bufS1[MAVLINK_MAX_PACKET_LEN];
+	uint16_t total_len = 0;
+	uint8_t mavBuff[64];
+	systime_t last_send = 0;
+
+	while (g_boardStatus & SIM900D_DETECTED) {
+		uint8_t bytesRead = chnReadTimeout(&SD4, mavBuff, 64, MS2ST(5));
+		uint8_t i;
+		for (i = 0; i < bytesRead; i++) {
+			if (mavlink_parse_char(MAVLINK_COMM_0, mavBuff[i], &msg, &status)) {
+				switch(msg.msgid){
+					case MAVLINK_MSG_ID_SYS_STATUS: {
+						mavlink_sys_status_t pack;
+						mavlink_msg_sys_status_decode(&msg, &pack);
+						mavlink_msg_sys_status_pack(msg.sysid, msg.compid, &msgs,
+								pack.onboard_control_sensors_present, pack.onboard_control_sensors_enabled,
+								pack.onboard_control_sensors_health, pack.load,
+								pack.voltage_battery, pack.current_battery, pack.battery_remaining,
+								pack.drop_rate_comm, pack.errors_comm, pack.errors_count1,
+								pack.errors_count2, pack.errors_count3, pack.errors_count4);
+						break;
+					}
+					case MAVLINK_MSG_ID_ATTITUDE: {
+						mavlink_attitude_t pack;
+						mavlink_msg_attitude_decode(&msg, &pack);
+						mavlink_msg_attitude_pack(msg.sysid, msg.compid, &msgs,
+								pack.time_boot_ms, pack.roll, pack.pitch, pack.yaw,
+								pack.rollspeed, pack.pitchspeed, pack.yawspeed);
+						break;
+					}
+					case MAVLINK_MSG_ID_VFR_HUD: {
+						mavlink_vfr_hud_t pack;
+						mavlink_msg_vfr_hud_decode(&msg, &pack);
+						mavlink_msg_vfr_hud_pack(msg.sysid, msg.compid, &msgs,
+								pack.airspeed, pack.groundspeed, pack.heading, pack.throttle,
+								pack.alt, pack.climb);
+						break;
+					}
+					case MAVLINK_MSG_ID_SYSTEM_TIME: {
+						mavlink_system_time_t pack;
+						mavlink_msg_system_time_decode(&msg, &pack);
+						mavlink_msg_system_time_pack(msg.sysid, msg.compid, &msgs,
+								pack.time_unix_usec, pack.time_boot_ms);
+					}
+					/*case MAVLINK_MSG_ID_BATTERY_STATUS: {
+						mavlink_battery_status_t pack;
+						mavlink_msg_battery_status_decode(&msg, &pack);
+						mavlink_msg_battery_status_pack(msg.sysid, msg.compid, &msgs,
+								pack.id, pack.battery_function, pack.type, pack.temperature,
+								pack.voltages, pack.current_battery, pack.current_consumed,
+								pack.energy_consumed, pack.battery_remaining);
+						break;
+					}*/
+					case MAVLINK_MSG_ID_COMMAND_ACK: {
+						mavlink_command_ack_t pack;
+						mavlink_msg_command_ack_decode(&msg, &pack);
+						mavlink_msg_command_ack_pack(msg.sysid, msg.compid, &msgs,
+								pack.command, pack.result);
+						break;
+					}
+					case MAVLINK_MSG_ID_HEARTBEAT: {
+						mavlink_heartbeat_t pack;
+						mavlink_msg_heartbeat_decode(&msg, &pack);
+						mavlink_msg_heartbeat_pack(msg.sysid, msg.compid, &msgs,
+								pack.type, pack.autopilot, pack.base_mode, pack.custom_mode,
+								pack.system_status);
+						break;
+					}
+				}
+				if (total_len + (uint16_t) (MAVLINK_NUM_NON_PAYLOAD_BYTES + msgs.len)>= SIM900D_SEND_BUF) {
+					chnWrite(&SD3, bufS, total_len);
+					total_len = 0;
+					last_send = MS2ST(chTimeNow());
+				}
+				uint16_t len = mavlink_msg_to_send_buffer(&bufS[total_len], &msgs);
+				total_len += len;
+			}
+		}
+		if (MS2ST(chTimeNow()) > last_send + SIM900D_SEND_TIMEOUT_MS
+				&& total_len > 0) {
+			chnWrite(&SD3, bufS, total_len);
+			total_len = 0;
+			last_send = MS2ST(chTimeNow());
+		}
+
+		bytesRead = chnReadTimeout(&SD3, mavBuff, 64, MS2ST(5));
+		for (i = 0; i < bytesRead; i++) {
+			if (mavlink_parse_char(MAVLINK_COMM_1, mavBuff[i], &msg, &status)) {
+				uint16_t len = mavlink_msg_to_send_buffer(bufS1, &msg);
+				chnWrite(&SD4, bufS1, len);
+			}
+		}
+		chThdSleepMilliseconds(20);
+	}
+	/* This point may be reached if shut down is requested. */
+	return 0;
 }
 
 /*
@@ -74,30 +185,32 @@ static msg_t UARTResend(void *arg) {
  */
 int main(void) {
 
-  /*
-   * System initializations.
-   * - HAL initialization, this also initializes the configured device drivers
-   *   and performs the board-specific initializations.
-   * - Kernel initialization, the main() function becomes a thread and the
-   *   RTOS is active.
-   */
-  halInit();
-  chSysInit();
+	/*
+	 * System initializations.
+	 * - HAL initialization, this also initializes the configured device drivers
+	 *   and performs the board-specific initializations.
+	 * - Kernel initialization, the main() function becomes a thread and the
+	 *   RTOS is active.
+	 */
+	halInit();
+	chSysInit();
 
-  reset_sim900d();
+	sdStart(&SD3, &uart2_cfg); //UART2 for GSM
+	sdStart(&SD4, &uart3_cfg); //UART3 for telemetry
 
-  sdStart(&SD3, &uart2_cfg); //UART2 for GSM
-  sdStart(&SD4, &uart3_cfg); //UART3 for telemetry
+	chThdCreateStatic(waBlinkerThread, sizeof(waBlinkerThread),
+	NORMALPRIO - 1, BlinkerThread, NULL);
 
-  chThdCreateStatic(waUARTResend, sizeof(waUARTResend),
-        NORMALPRIO - 1, UARTResend, NULL);
+	chThdSleepMilliseconds(500);
 
-  chThdCreateStatic(waBlinkerThread, sizeof(waBlinkerThread),
-      NORMALPRIO - 1, BlinkerThread, NULL);
+	chThdCreateStatic(waUART, sizeof(waUART),
+	NORMALPRIO, UART, NULL);
 
-  while (TRUE) {
+	/*reset_sim900d();
+	 chThdCreateStatic(waUARTResend, sizeof(waUARTResend),
+	 NORMALPRIO, UARTResend, NULL);*/
 
-      chThdSleepMilliseconds(500);
-    }
-
+	while (TRUE) {
+		chThdSleepMilliseconds(1000);
+	}
 }

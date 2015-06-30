@@ -1,0 +1,8 @@
+at+cstt="bangapro"
+
+at+ciicr //duoti ilgesni laika
+
+at+ifsr
+
+at+cipserver=1,1234   
+

@@ -5,7 +5,7 @@
 
 # Compiler options here.
 ifeq ($(USE_OPT),)
-  USE_OPT = -O2 -ggdb -fomit-frame-pointer
+  USE_OPT = -O0 -ggdb -fomit-frame-pointer
 endif
 
 # C specific options here (added to USE_OPT).
@@ -106,7 +106,7 @@ ASMSRC = $(PORTASM)
 
 INCDIR = $(PORTINC) $(KERNINC) $(TESTINC) \
          $(HALINC) $(PLATFORMINC) $(BOARDINC) \
-         $(CHIBIOS)/os/various
+         $(CHIBIOS)/os/various mavlink/common
 
 #
 # Project, sources and paths
