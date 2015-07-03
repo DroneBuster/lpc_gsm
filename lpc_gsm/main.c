@@ -142,6 +142,87 @@ static msg_t UART(void *arg) {
 								pack.command, pack.result);
 						break;
 					}
+					case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
+					    mavlink_global_position_int_t pack;
+					    mavlink_msg_global_position_int_decode(&msg, &pack);
+					    mavlink_msg_global_position_int_pack(msg.sysid, msg.compid, &msgs,
+					            pack.time_boot_ms, pack.lat, pack.lon, pack.alt,
+					            pack.relative_alt, pack.vx, pack.vy, pack.vz, pack.hdg);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_COUNT: {
+					    mavlink_mission_count_t pack;
+					    mavlink_msg_mission_count_decode(&msg, &pack);
+					    mavlink_msg_mission_count_pack(msg.sysid, msg.compid, &msgs,
+					            pack.target_system, pack.target_component, pack.count);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_ACK: {
+					    mavlink_mission_ack_t pack;
+					    mavlink_msg_mission_ack_decode(&msg, &pack);
+					    mavlink_msg_mission_ack_pack(msg.sysid, msg.compid, &msgs,
+					            pack.target_system, pack.target_component, pack.type);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_ITEM: {
+					    mavlink_mission_item_t pack;
+					    mavlink_msg_mission_item_decode(&msg, &pack);
+					    mavlink_msg_mission_item_pack(msg.sysid, msg.compid, &msgs,
+                                pack.target_system, pack.target_component, pack.seq,
+                                pack.frame, pack.command, pack.current, pack.autocontinue,
+                                pack.param1, pack.param2, pack.param3, pack.param4,
+                                pack.x, pack.y, pack.z);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_CURRENT: {
+					    mavlink_mission_current_t pack;
+					    mavlink_msg_mission_current_decode(&msg, &pack);
+					    mavlink_msg_mission_current_pack(msg.sysid, msg.compid, &msgs,
+					            pack.seq);
+					    break;
+					}
+					case MAVLINK_MSG_ID_STATUSTEXT: {
+					    mavlink_statustext_t pack;
+					    mavlink_msg_statustext_decode(&msg, &pack);
+					    mavlink_msg_statustext_pack(msg.sysid, msg.compid, &msgs,
+					            pack.severity, pack.text);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_REQUEST_PARTIAL_LIST: {
+					    mavlink_mission_request_partial_list_t pack;
+					    mavlink_msg_mission_request_partial_list_decode(&msg, &pack);
+					    mavlink_msg_mission_request_partial_list_pack(msg.sysid,
+					            msg.compid, &msgs, pack.target_system, pack.target_component,
+					            pack.start_index, pack.end_index);
+					    break;
+					}
+					case MAVLINK_MSG_ID_MISSION_REQUEST: {
+					    mavlink_mission_request_t pack;
+					    mavlink_msg_mission_request_decode(&msg, &pack);
+					    mavlink_msg_mission_request_pack(msg.sysid, msg.compid, &msgs,
+					            pack.target_system, pack.target_component, pack.seq);
+
+					}
+					case MAVLINK_MSG_ID_COMMAND_INT: {
+					    mavlink_command_int_t pack;
+					    mavlink_msg_command_int_decode(&msg, &pack);
+					    mavlink_msg_command_int_pack(msg.sysid, msg.compid, &msgs,
+					            pack.target_system, pack.target_component, pack.frame,
+					            pack.command, pack.current, pack.autocontinue,
+					            pack.param1, pack.param2, pack.param3, pack.param4,
+					            pack.x, pack.y, pack.z);
+					    break;
+					}
+                    case MAVLINK_MSG_ID_COMMAND_LONG: {
+                        mavlink_command_long_t pack;
+                        mavlink_msg_command_long_decode(&msg, &pack);
+                        mavlink_msg_command_long_pack(msg.sysid, msg.compid,
+                                &msgs, pack.target_system,
+                                pack.target_component, pack.command, pack.confirmation,
+                                pack.param1, pack.param2, pack.param3, pack.param4,
+                                pack.param5, pack.param6, pack.param7);
+                        break;
+                    }
 					case MAVLINK_MSG_ID_HEARTBEAT: {
 						mavlink_heartbeat_t pack;
 						mavlink_msg_heartbeat_decode(&msg, &pack);
